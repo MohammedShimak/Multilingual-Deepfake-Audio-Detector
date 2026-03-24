@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+python-multipart
+motor
+
+xgboost
+librosa
+numpy
+scikit-learn
+python-jose[cryptography]
+passlib[bcrypt]
+soundfile
+pydantic[email]
+python-dotenv
+aiofiles

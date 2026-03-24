@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+backend/venv/
+
+# Node
+node_modules/
+dist/
+build/
+.npm/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Temporary files & Uploads
+uploads/
+test_audio.wav
+*.wav
+*.mp3
+*.flac
+*.ogg
