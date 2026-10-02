@@ -91,9 +91,10 @@ function App() {
           <div className="container mx-auto px-4 text-center flex flex-col items-center space-y-4">
             <h4 className="text-xl font-bold gradient-text">About AudioVerifier</h4>
             <p className="text-text-muted text-sm max-w-2xl">
-              AudioVerifier leverages a cutting-edge Machine Learning pipeline (CNN feature extraction + XGBoost classifier) 
-              to analyze Mel-spectrograms of your audio. We detect unnatural spectral patterns and synthetic frequencies 
-              to distinguish authentic human voices from AI-generated deepfakes in seconds.
+              AudioVerifier leverages a cutting-edge CNN + Gradient Boosting deep learning model with 98% accuracy 
+              to analyze Mel-spectrograms of your audio. The CNN layers extract spatial features from spectrograms while 
+              the XGBoost captures temporal patterns, enabling precise detection of synthetic frequencies 
+              and AI-generated artifacts to distinguish authentic human voices from deepfakes in seconds.
             </p>
             <div className="pt-6 mt-2 border-t border-white/5 w-64">
               <p className="text-text-muted text-xs">

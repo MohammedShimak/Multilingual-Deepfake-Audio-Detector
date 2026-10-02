@@ -25,3 +25,7 @@ test_audio.wav
 *.mp3
 *.flac
 *.ogg
+*.keras
+backend/venv_tf/
+AudioVerifier_Full_Project.zip
+backend_log.txt

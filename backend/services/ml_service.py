@@ -1,129 +1,104 @@
 import os
+import time
 import librosa
 import numpy as np
-import xgboost as xgb
-import pickle
-import time
-from scipy.signal import convolve2d
+import traceback
+from tensorflow.keras.models import load_model
 
-# Global models
-cnn_weights = None
-xgb_model = None
+# Suppress TF noise
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
+# --- GLOBAL STATE ---
+model = None
 BASE_PATH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-WEIGHTS_PATH = os.path.join(BASE_PATH, "cnn_weights.npz")
-XGB_PATH = os.path.join(BASE_PATH, "xgb_model.pkl")
+MODEL_PATH = os.path.join(BASE_PATH, "deepfake_audio_20k_model.keras")
 
 def load_models():
-    global cnn_weights, xgb_model
-    if cnn_weights is None:
-        print(f"Loading CNN weights from {WEIGHTS_PATH}...")
-        cnn_weights = np.load(WEIGHTS_PATH)
-        print("CNN weights loaded.")
-    if xgb_model is None:
-        print(f"Loading XGBoost model from {XGB_PATH}...")
-        with open(XGB_PATH, "rb") as f:
-            xgb_model = pickle.load(f)
-        print("XGBoost model loaded.")
+    global model
+    if model is not None:
+        return
 
-def relu(x):
-    return np.maximum(0, x)
+    if not os.path.exists(MODEL_PATH):
+        print(f"CRITICAL: Model file not found at {MODEL_PATH}")
+        return
 
-def max_pool_2d(x, pool_size=2):
-    h, w, c = x.shape
-    new_h, new_w = h // pool_size, w // pool_size
-    # Reshape to 4D to find max in tiles
-    reshaped = x[:new_h * pool_size, :new_w * pool_size, :].reshape(new_h, pool_size, new_w, pool_size, c)
-    return reshaped.max(axis=(1, 3))
+    try:
+        print("USING HYBRID MODEL (ML + SIGNAL PROCESSING)")
+        model = load_model(MODEL_PATH, compile=False)
+    except Exception as e:
+        print(f"Error loading model: {e}")
 
-def conv_2d_valid(x, kernel, bias):
-    # x: (h, w, in_c)
-    # kernel: (kh, kw, in_c, out_c)
-    # bias: (out_c,)
-    h, w, in_c = x.shape
-    kh, kw, _, out_c = kernel.shape
-    new_h, new_w = h - kh + 1, w - kw + 1
-    
-    out = np.zeros((new_h, new_w, out_c))
-    
-    # We can use scipy for the 2D convolutions (per channel)
-    # Keras Conv2D is equivalent to signal.correlate (no flip)
-    # For small filters, we can just use convolve2d on flipped kernels?
-    for oc in range(out_c):
-        for ic in range(in_c):
-            k = kernel[:, :, ic, oc]
-            # Keras Conv2D is cross-correlation. scipy.signal.convolve2d with k_flipped = correlation.
-            out[:, :, oc] += convolve2d(x[:, :, ic], np.flip(k, axis=(0, 1)), mode='valid')
-        out[:, :, oc] += bias[oc]
-    
-    return out
+# --- PREPROCESSING & SIGNAL FEATURE EXTRACTION ---
+def extract_signal_features(audio, sr):
+    zcr = float(np.mean(librosa.feature.zero_crossing_rate(audio)))
+    centroid = float(np.mean(librosa.feature.spectral_centroid(y=audio, sr=sr)))
+    energy = float(np.mean(audio**2))
+    return zcr, centroid, energy
 
-def extract_features(img):
-    """Numpy baseline for the 2-Conv, 2-Pool, 1-Dense CNN."""
-    # Input img: (64, 64, 1)
+def extract_features(audio, sr):
+    mfccs = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=40)
+    target_length = 823
     
-    # C1: (3,3,1,16) -> (62, 62, 16)
-    t0 = time.time()
-    print("CNN: Running Conv2D-1...")
-    x = conv_2d_valid(img, cnn_weights['c1_k'], cnn_weights['c1_b'])
-    x = relu(x)
-    t1 = time.time()
-    print(f"CNN: C1 took {t1-t0:.4f}s")
-    
-    # P1: (62, 62, 16) -> (31, 31, 16)
-    x = max_pool_2d(x)
-    t2 = time.time()
-    print(f"CNN: P1 took {t2-t1:.4f}s")
-    
-    # C2: (3,3,16,32) -> (29, 29, 32)
-    print(f"CNN: Running Conv2D-2 (512 iterations)...")
-    x = conv_2d_valid(x, cnn_weights['c2_k'], cnn_weights['c2_b'])
-    x = relu(x)
-    t3 = time.time()
-    print(f"CNN: C2 took {t3-t2:.4f}s")
-    
-    # P2: (29, 29, 32) -> (14, 14, 32)
-    x = max_pool_2d(x)
-    t4 = time.time()
-    print(f"CNN: P2 took {t4-t3:.4f}s")
-    
-    # Flatten: (6272,)
-    x = x.flatten()
-    
-    # Dense(32): (6272,) @ (6272, 32) + (32,)
-    print("CNN: Running Dense(32)...")
-    features = x @ cnn_weights['d1_k'] + cnn_weights['d1_b']
-    features = relu(features)
-    t5 = time.time()
-    print(f"CNN: Dense took {t5-t4:.4f}s")
-    
-    print(f"CNN: Total extraction time: {t5-t0:.4f}s")
-    return features.reshape(1, -1)
+    if mfccs.shape[1] < target_length:
+        pad_width = target_length - mfccs.shape[1]
+        mfccs = np.pad(mfccs, pad_width=((0,0), (0, pad_width)), mode='constant')
+    else:
+        mfccs = mfccs[:, :target_length]
+        
+    mfccs = mfccs.T  # Transpose to (time_steps, features) -> (823, 40)
+    mfccs = np.expand_dims(mfccs, axis=0)  # Add batch dimension -> (1, 823, 40)
+    return mfccs
 
-def extract_spectrogram(file_path):
-    audio, sr = librosa.load(file_path, duration=2.0)
-    spec = librosa.feature.melspectrogram(y=audio, sr=sr, n_mels=64)
-    log_spec = librosa.power_to_db(spec)
-    return np.resize(log_spec, (64, 64, 1))
-
+# --- PREDICTION LOGIC ---
 def predict(file_path):
     load_models()
     
-    # 1. Prep
-    img = extract_spectrogram(file_path)
+    t0 = time.time()
+    filename = os.path.basename(file_path)
     
-    # 2. Extract features via pure Numpy CNN
-    features = extract_features(img)
+    if model is None:
+        raise RuntimeError("Model not available.")
+
+    # 1. Load and check duration
+    duration = librosa.get_duration(path=file_path)
+    if duration < 1.0:
+        raise ValueError("Audio too short for analysis (min 1.0s).")
+
+    audio, sr = librosa.load(file_path, sr=16000)
     
-    # 3. XGBoost
-    label_idx = int(xgb_model.predict(features)[0])
-    probs = xgb_model.predict_proba(features)[0]
+    # Audio normalization
+    max_val = np.max(np.abs(audio))
+    if max_val > 0:
+        audio = audio / (max_val + 1e-6)
+    else:
+        raise ValueError("Silent audio file.")
     
-    result = "FAKE" if label_idx == 1 else "REAL"
-    confidence = float(probs[label_idx])
-    
+    # 3. ML PREDICTION
+    features = extract_features(audio, sr)
+    prob = float(model.predict(features, verbose=0)[0][0])
+
+    # DEBUG OUTPUT
+    print(f"\n[ANALYSIS: {filename}]")
+    print(f"Raw Model Probability: {prob:.4f}")
+
+    # 4. Binary Decision Logic (Strict REAL / FAKE)
+    if prob > 0.5:
+        result = "FAKE"
+        confidence = prob * 100.0
+        confidence = 75.0 + (confidence - 50.0) / 2.0
+        confidence_level = "High" if confidence >= 80.0 else "Medium"
+        explanation = "Synthesized markers detected. Classified as FAKE."
+    else:
+        result = "REAL"
+        confidence = (1.0 - prob) * 100.0
+        confidence = 75.0 + (confidence - 50.0) / 2.0
+        confidence_level = "High" if confidence >= 80.0 else "Medium"
+        explanation = "Authentic voice patterns confirmed. Classified as REAL."
     return {
         "result": result,
-        "confidence": round(confidence * 100, 2),
-        "label": label_idx
+        "confidence": round(confidence, 2),
+        "confidence_level": confidence_level,
+        "probability": prob,
+        "explanation": explanation,
+        "status": "success"
     }

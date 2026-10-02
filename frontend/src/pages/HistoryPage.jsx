@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ShieldCheck, ShieldAlert, History, Calendar, Trash2, Search, Filter } from 'lucide-react'
+import { ShieldCheck, ShieldAlert, AlertTriangle, History, Calendar, Trash2, Search, Filter } from 'lucide-react'
 
 const HistoryPage = ({ token }) => {
   const [history, setHistory] = useState([])
@@ -21,7 +21,7 @@ const HistoryPage = ({ token }) => {
       if (token) {
         config.headers = { Authorization: `Bearer ${token}` }
       }
-      const response = await axios.get('http://localhost:8000/api/history', config)
+      const response = await axios.get('/api/history', config)
       setHistory(response.data)
     } catch (err) {
       console.error('Fetch history error:', err)
@@ -103,7 +103,8 @@ const HistoryPage = ({ token }) => {
           <AnimatePresence mode="popLayout">
             {filteredHistory.map((item, index) => {
               const isFake = item.result === 'FAKE'
-              const color = isFake ? 'var(--danger)' : 'var(--success)'
+              const isUncertain = item.result === 'UNCERTAIN'
+              const color = isFake ? 'var(--danger)' : isUncertain ? 'var(--warning, #facc15)' : 'var(--success)'
               
               return (
                 <motion.div 
@@ -126,6 +127,8 @@ const HistoryPage = ({ token }) => {
                     </div>
                     {isFake ? (
                       <ShieldAlert size={28} className="text-danger flex-shrink-0" />
+                    ) : item.result === 'UNCERTAIN' ? (
+                      <AlertTriangle size={28} className="text-warning flex-shrink-0" style={{ color: color }}/>
                     ) : (
                       <ShieldCheck size={28} className="text-success flex-shrink-0" />
                     )}

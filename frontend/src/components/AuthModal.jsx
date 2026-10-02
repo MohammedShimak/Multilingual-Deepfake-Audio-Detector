@@ -17,7 +17,7 @@ export default function AuthModal({ isOpen, onClose, onLogin }) {
     setLoading(true);
     try {
       const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
-      const res = await axios.post(`http://localhost:8000${endpoint}`, { username, password });
+      const res = await axios.post(endpoint, { username, password });
       onLogin(res.data.user, res.data.token);
       onClose();
     } catch (err) {
